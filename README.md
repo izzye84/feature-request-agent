@@ -1,6 +1,6 @@
 # Dagster Agentic Orchestration Demo
 
-A Dagster pipeline that demonstrates agentic orchestration using Claude (Anthropic). A multi-step agent workflow that ingests a feature request, plans implementation tasks, generates code, runs quality gates, and produces a PR-ready artifact — all orchestrated as Dagster assets with full lineage, retries, and observability.
+A Dagster pipeline that demonstrates agentic orchestration using Grok (xAI). A multi-step agent workflow that ingests a feature request, plans implementation tasks, generates code, runs quality gates, and produces a PR-ready artifact — all orchestrated as Dagster assets with full lineage, retries, and observability.
 
 ## Pipeline overview
 
@@ -8,7 +8,7 @@ A Dagster pipeline that demonstrates agentic orchestration using Claude (Anthrop
 ingest_requirements → analyze_and_plan → generate_code → run_quality_gates → publish_artifact
 ```
 
-| Asset | Agent role | Claude call |
+| Asset | Agent role | Grok call |
 |---|---|---|
 | `ingest_requirements` | Parses raw feature request → structured JSON spec | Yes |
 | `analyze_and_plan` | Decomposes spec → ordered task plan | Yes |
@@ -30,17 +30,17 @@ Two sensors are also included:
 uv sync
 ```
 
-### 2. Set your Anthropic API key
+### 2. Set your xAI API key
 
 Create a `.env` file in the project root:
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-...
+XAI_API_KEY=xai-...
 ```
 
-To get an API key: go to **console.anthropic.com** → API Keys → Create Key.
+To get an API key: go to **console.x.ai** → API Keys → Create Key.
 
-> **Note:** The Anthropic API is billed separately from your claude.ai subscription (pay-per-token). Add a payment method at console.anthropic.com under Billing if you haven't already.
+> **Note:** The xAI API is billed per token, separately from any Grok / X Premium subscription.
 
 ### 3. Start the Dagster UI
 
@@ -80,7 +80,7 @@ ops:
       feature_request: "Add a data quality check that validates transaction amounts
         are within ±3 standard deviations of the rolling 30-day mean before writing
         to the curated layer."
-      model: "claude-sonnet-4-6"
+      model: "grok-4.7"
       max_tokens: 4096
       quality_gate_threshold: 0.35
       reviewer: "data-eng-team"
@@ -91,18 +91,14 @@ ops:
 | Field | Default | Description |
 |---|---|---|
 | `feature_request` | *(data quality check example)* | The feature request text. Paste any plain-English request here. |
-| `model` | `claude-sonnet-4-6` | Any Anthropic model string. See model options below. |
-| `max_tokens` | `4096` | Max tokens per Claude response. Increase for complex codegen. |
+| `model` | `grok-4.7` | Any xAI model string. See model options below. |
+| `max_tokens` | `4096` | Max tokens per Grok response. Increase for complex codegen. |
 | `quality_gate_threshold` | `0.35` | Float 0.0–1.0. LLM review score must meet or exceed this to pass. Raise it (e.g. `0.99`) to deliberately trigger a gate failure for demo purposes. |
 | `reviewer` | `data-eng-team` | Label shown in the PR artifact. No functional effect. |
 
-### Available Claude models
+### Available Grok models
 
-| Model | Speed | Best for |
-|---|---|---|
-| `claude-haiku-4-5-20251001` | Fastest / cheapest | Quick demos, iteration |
-| `claude-sonnet-4-6` | Balanced | Default production use |
-| `claude-opus-4-6` | Most capable | Complex codegen, high-stakes review |
+The default is `grok-4.7`. See the [xAI models page](https://docs.x.ai/developers/models) for the current list of model names, context windows, and pricing.
 
 ---
 
@@ -110,7 +106,7 @@ ops:
 
 After a successful run:
 
-- **Asset graph** — five nodes with Claude badges showing the dependency chain
+- **Asset graph** — five nodes with Grok badges showing the dependency chain
 - **`ingest_requirements` metadata** — structured JSON spec, complexity, estimated hours, tokens used
 - **`analyze_and_plan` metadata** — full task plan JSON, task count, risk list, reviewer notes
 - **`generate_code` metadata** — generated Python source code, line count, artifact URL
@@ -149,14 +145,14 @@ The sensor polls `requests/queue.json` every 30 seconds for new entries. An exam
   {
     "id": "FR-001",
     "feature_request": "...",
-    "model": "claude-sonnet-4-6",
+    "model": "grok-4.7",
     "quality_gate_threshold": 0.35,
     "reviewer": "data-eng-team"
   },
   {
     "id": "FR-002",
     "feature_request": "Write a Dagster asset that reads a list of stock tickers and returns the top 5 by 30-day price volatility.",
-    "model": "claude-sonnet-4-6",
+    "model": "grok-4.7",
     "quality_gate_threshold": 0.35,
     "reviewer": "quant-team"
   }
@@ -176,7 +172,9 @@ The sensor cursor persists processed IDs between ticks — adding `FR-002` again
 
 ```
 src/dagster_agent_demo/
-├── definitions.py          # Entry point — binds AnthropicResource, loads defs
+├── definitions.py          # Entry point — binds GrokResource, loads defs
+├── resources/
+│   └── grok.py             # Custom GrokResource (modelled on dagster-anthropic)
 └── defs/
     ├── __init__.py         # Empty — load_from_defs_folder handles discovery
     ├── assets.py           # All 5 pipeline assets + AgentPipelineConfig
@@ -188,6 +186,6 @@ src/dagster_agent_demo/
 ## Learn more
 
 - [Dagster Documentation](https://docs.dagster.io/)
-- [dagster-anthropic integration](https://docs.dagster.io/integrations/libraries/anthropic)
-- [Anthropic API docs](https://docs.anthropic.com)
+- [xAI API docs](https://docs.x.ai/overview)
+- [dagster-anthropic integration](https://docs.dagster.io/integrations/libraries/anthropic) — the design `GrokResource` follows
 - [Dagster University](https://courses.dagster.io/)
