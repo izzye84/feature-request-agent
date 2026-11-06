@@ -2,14 +2,14 @@
   {
     "id": "FR-001",
     "feature_request": "Write a single Dagster asset that accepts a pandas DataFrame of transactions (columns: transaction_id, amount, merchant_category) and returns a summary DataFrame with mean, std, and outlier_count per merchant_category, flagging amounts beyond 3 standard deviations.",
-    "model": "grok-4.7",
+    "model": "claude-sonnet-4-6",
     "quality_gate_threshold": 0.35,
     "reviewer": "data-eng-team"
   },
   {
     "id": "FR-002",
     "feature_request": "Write a Dagster asset that reads a list of stock tickers and returns the top 5 by 30-day price volatility.",
-    "model": "grok-4.7",
+    "model": "claude-sonnet-4-6",
     "quality_gate_threshold": 0.35,
     "reviewer": "quant-team"
   }

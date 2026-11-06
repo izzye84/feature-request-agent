@@ -204,7 +204,6 @@ __marimo__/
 
 # dagster
 .dg
-.tmp*
 
 # claude
 .claude

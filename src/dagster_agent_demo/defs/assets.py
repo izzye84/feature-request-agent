@@ -17,7 +17,7 @@ Each step is a Dagster asset:
   * full lineage in the asset graph
   * metadata surfaced in the UI (token usage, scores, file paths)
   * retries, partitioning, and scheduling come for free
-  * swap the model/provider by changing the GrokResource config — zero
+  * swap the model/provider by changing the AnthropicResource config — zero
     asset code changes required
 
 Agentic orchestration capabilities addressed
@@ -31,8 +31,8 @@ Feedback loops / memory                   Sensor triggers re-run; metadata as me
 Reproducible code execution               code_version tags, config schema, run log
 Produces artifacts (PRs, code, outputs)   MaterializeResult + metadata URLs
 Multi-agent workflows                     Each asset = an agent step; compose freely
-Multiple model providers                  Swap GrokResource for any provider
-Off the shelf                             Custom GrokResource modelled on dagster-anthropic
+Multiple model providers                  Swap AnthropicResource for any provider
+Off the shelf                             dagster-anthropic ships today; copy-paste ready
 """
 
 import json
@@ -40,7 +40,7 @@ import textwrap
 from datetime import datetime, timezone
 
 import dagster as dg
-from dagster_agent_demo.resources import GrokResource
+from dagster_anthropic import AnthropicResource
 
 
 # ---------------------------------------------------------------------------
@@ -55,38 +55,38 @@ class AgentPipelineConfig(dg.Config):
         "and returns a summary DataFrame with mean, std, and outlier_count "
         "per merchant_category, flagging amounts beyond 3 standard deviations."
     )
-    model: str = "grok-4.7"                  # swap model per run via config
+    model: str = "claude-sonnet-4-6"          # swap model per run via config
     max_tokens: int = 8192
     quality_gate_threshold: float = 0.35      # score below this blocks promotion
     reviewer: str = "data-eng-team"           # notional approval owner
 
 
-def _call_grok(
+def _call_claude(
     client,
     model: str,
     prompt: str,
     max_tokens: int = 8192,
 ) -> tuple[str, int]:
     """
-    Thin wrapper around the xAI (OpenAI-compatible) chat completions API.
-    Returns (text_content, total_tokens).
+    Thin wrapper around the Anthropic messages API.
+    Returns (text_content, total_input_tokens + output_tokens).
 
     Centralising the call here means swapping to a different model or
     adding streaming later is a one-line change — no asset code touched.
     """
-    response = client.chat.completions.create(
+    response = client.messages.create(
         model=model,
         max_tokens=max_tokens,
         messages=[{"role": "user", "content": prompt}],
     )
-    text = (response.choices[0].message.content or "").strip()
-    tokens = response.usage.total_tokens if response.usage else 0
+    text = response.content[0].text.strip()
+    tokens = (response.usage.input_tokens or 0) + (response.usage.output_tokens or 0)
     return text, tokens
 
 
 def _extract_json(text: str) -> str:
     """
-    Strip markdown code fences that LLMs sometimes wrap around JSON,
+    Strip markdown code fences that Claude sometimes wraps around JSON,
     then return the first JSON object or array found in the text.
 
     Handles responses like:
@@ -114,7 +114,7 @@ def _extract_json(text: str) -> str:
 # ===========================================================================
 @dg.asset(
     group_name="agentic_pipeline",
-    kinds={"grok"},
+    compute_kind="claude",
     description=(
         "Receives a raw feature request (from config, Jira, Slack sensor, etc.) "
         "and uses an LLM to normalise it into a structured JSON spec. "
@@ -128,7 +128,7 @@ def _extract_json(text: str) -> str:
 def ingest_requirements(
     context: dg.AssetExecutionContext,
     config: AgentPipelineConfig,
-    grok: GrokResource,
+    anthropic: AnthropicResource,
 ) -> dg.MaterializeResult:
     """
     LLM call: parse the raw feature request into a structured spec.
@@ -157,8 +157,8 @@ def ingest_requirements(
         Respond ONLY with valid JSON. No markdown fences.
     """).strip()
 
-    with grok.get_client(context) as client:
-        raw_json, tokens = _call_grok(client, config.model, prompt, config.max_tokens)
+    with anthropic.get_client(context) as client:
+        raw_json, tokens = _call_claude(client, config.model, prompt, config.max_tokens)
 
     # Parse to validate — raises if LLM returned malformed JSON
     spec = json.loads(_extract_json(raw_json))
@@ -186,7 +186,7 @@ def ingest_requirements(
 # ===========================================================================
 @dg.asset(
     group_name="agentic_pipeline",
-    kinds={"grok"},
+    compute_kind="claude",
     description=(
         "Planning agent: reads the structured spec and decomposes it into an "
         "ordered task plan. Produces the 'scratchpad' that the code-generation "
@@ -200,7 +200,7 @@ def ingest_requirements(
 def analyze_and_plan(
     context: dg.AssetExecutionContext,
     config: AgentPipelineConfig,
-    grok: GrokResource,
+    anthropic: AnthropicResource,
     ingest_requirements: dict,  # upstream asset injected by name
 ) -> dg.MaterializeResult:
     """
@@ -244,8 +244,8 @@ def analyze_and_plan(
         Respond ONLY with valid JSON. No markdown fences.
     """).strip()
 
-    with grok.get_client(context) as client:
-        raw_json, tokens = _call_grok(client, config.model, prompt, config.max_tokens)
+    with anthropic.get_client(context) as client:
+        raw_json, tokens = _call_claude(client, config.model, prompt, config.max_tokens)
 
     plan = json.loads(_extract_json(raw_json))
 
@@ -271,7 +271,7 @@ def analyze_and_plan(
 # ===========================================================================
 @dg.asset(
     group_name="agentic_pipeline",
-    kinds={"grok"},
+    compute_kind="claude",
     description=(
         "Code-generation agent: implements the task plan as production-ready "
         "Python/SQL. Outputs are stored as metadata artifacts — reproducible "
@@ -284,7 +284,7 @@ def analyze_and_plan(
 def generate_code(
     context: dg.AssetExecutionContext,
     config: AgentPipelineConfig,
-    grok: GrokResource,
+    anthropic: AnthropicResource,
     ingest_requirements: dict,
     analyze_and_plan: dict,
 ) -> dg.MaterializeResult:
@@ -318,8 +318,8 @@ def generate_code(
         Respond ONLY with Python source code. No markdown fences.
     """).strip()
 
-    with grok.get_client(context) as client:
-        generated_code, tokens = _call_grok(
+    with anthropic.get_client(context) as client:
+        generated_code, tokens = _call_claude(
             client, config.model, prompt, max_tokens=1024
         )
 
@@ -346,7 +346,7 @@ def generate_code(
 # ===========================================================================
 @dg.asset(
     group_name="agentic_pipeline",
-    kinds={"grok"},
+    compute_kind="claude",
     description=(
         "Automated quality gate: runs a set of guardrail checks against the "
         "generated code before it can be promoted. If the score is below the "
@@ -360,7 +360,7 @@ def generate_code(
 def run_quality_gates(
     context: dg.AssetExecutionContext,
     config: AgentPipelineConfig,
-    grok: GrokResource,
+    anthropic: AnthropicResource,
     generate_code: dict,
     analyze_and_plan: dict,
 ) -> dg.MaterializeResult:
@@ -415,8 +415,8 @@ def run_quality_gates(
         Respond ONLY with valid JSON. No markdown fences.
     """).strip()
 
-    with grok.get_client(context) as client:
-        raw_json, tokens = _call_grok(
+    with anthropic.get_client(context) as client:
+        raw_json, tokens = _call_claude(
             client, config.model, review_prompt, config.max_tokens
         )
 
