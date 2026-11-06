@@ -2,6 +2,8 @@
 
 A Dagster pipeline that demonstrates agentic orchestration using Grok (xAI). A multi-step agent workflow that ingests a feature request, plans implementation tasks, generates code, runs quality gates, and produces a PR-ready artifact — all orchestrated as Dagster assets with full lineage, retries, and observability.
 
+It also includes a **PR review gate**: a GitHub Action that runs a Cursor SDK cloud agent on every pull request to this repo, auto-approves only simple, secret-free changes, and routes everything else to a human. See [`pr_review_gate/`](pr_review_gate/README.md).
+
 ## Pipeline overview
 
 ```
@@ -30,13 +32,16 @@ Two sensors are also included:
 uv sync
 ```
 
-### 2. Set your xAI API key
+### 2. Set API keys
 
 Create a `.env` file in the project root:
 
 ```bash
 XAI_API_KEY=xai-...
+CURSOR_API_KEY=cursor_...
 ```
+
+`CURSOR_API_KEY` is only needed to run the [PR review gate](pr_review_gate/README.md) locally (in CI it's a repository secret).
 
 To get an API key: go to **console.x.ai** → API Keys → Create Key.
 
@@ -168,16 +173,22 @@ The sensor cursor persists processed IDs between ticks — adding `FR-002` again
 
 ---
 
+## PR review gate (Cursor SDK + GitHub Actions)
+
+A separate prototype in [`pr_review_gate/`](pr_review_gate/README.md): a GitHub Action runs a Cursor SDK cloud agent on every pull request to this repo, auto-approves only simple, secret-free changes, and routes everything else to a human. It's its own uv project and doesn't depend on the Dagster code.
+
+---
+
 ## Project structure
 
 ```
 src/dagster_agent_demo/
-├── definitions.py          # Entry point — binds GrokResource, loads defs
+├── definitions.py          # Dagster entry point — binds GrokResource, loads defs
 ├── resources/
 │   └── grok.py             # Custom GrokResource (modelled on dagster-anthropic)
 └── defs/
     ├── __init__.py         # Empty — load_from_defs_folder handles discovery
-    ├── assets.py           # All 5 pipeline assets + AgentPipelineConfig
+    ├── assets.py           # Grok feature-request pipeline
     └── sensors.py          # Feedback-loop sensor + new-request sensor
 ```
 

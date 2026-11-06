@@ -114,7 +114,7 @@ def _extract_json(text: str) -> str:
 # ===========================================================================
 @dg.asset(
     group_name="agentic_pipeline",
-    compute_kind="grok",
+    kinds={"grok"},
     description=(
         "Receives a raw feature request (from config, Jira, Slack sensor, etc.) "
         "and uses an LLM to normalise it into a structured JSON spec. "
@@ -186,7 +186,7 @@ def ingest_requirements(
 # ===========================================================================
 @dg.asset(
     group_name="agentic_pipeline",
-    compute_kind="grok",
+    kinds={"grok"},
     description=(
         "Planning agent: reads the structured spec and decomposes it into an "
         "ordered task plan. Produces the 'scratchpad' that the code-generation "
@@ -271,7 +271,7 @@ def analyze_and_plan(
 # ===========================================================================
 @dg.asset(
     group_name="agentic_pipeline",
-    compute_kind="grok",
+    kinds={"grok"},
     description=(
         "Code-generation agent: implements the task plan as production-ready "
         "Python/SQL. Outputs are stored as metadata artifacts — reproducible "
@@ -346,7 +346,7 @@ def generate_code(
 # ===========================================================================
 @dg.asset(
     group_name="agentic_pipeline",
-    compute_kind="grok",
+    kinds={"grok"},
     description=(
         "Automated quality gate: runs a set of guardrail checks against the "
         "generated code before it can be promoted. If the score is below the "

@@ -32,7 +32,7 @@ import dagster as dg
 
 
 # Path to the local queue file — relative to the project root
-_QUEUE_FILE = Path(__file__).parents[4] / "requests" / "queue.json"
+_QUEUE_FILE = Path(__file__).resolve().parents[3] / "requests" / "queue.json"
 
 
 # ---------------------------------------------------------------------------
