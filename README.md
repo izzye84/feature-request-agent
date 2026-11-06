@@ -200,3 +200,4 @@ src/dagster_agent_demo/
 - [xAI API docs](https://docs.x.ai/overview)
 - [dagster-anthropic integration](https://docs.dagster.io/integrations/libraries/anthropic) — the design `GrokResource` follows
 - [Dagster University](https://courses.dagster.io/)
+
