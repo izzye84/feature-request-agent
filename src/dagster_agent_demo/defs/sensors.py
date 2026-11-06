@@ -32,7 +32,7 @@ import dagster as dg
 
 
 # Path to the local queue file — relative to the project root
-_QUEUE_FILE = Path(__file__).parents[4] / "requests" / "queue.json"
+_QUEUE_FILE = Path(__file__).resolve().parents[3] / "requests" / "queue.json"
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +130,7 @@ def new_feature_request_sensor(
       {
         "id": "FR-001",
         "feature_request": "Plain English description of the feature...",
-        "model": "claude-sonnet-4-6",          (optional, uses default if omitted)
+        "model": "grok-4.7",          (optional, uses default if omitted)
         "quality_gate_threshold": 0.35         (optional, uses default if omitted)
       }
     ]
@@ -188,7 +188,7 @@ def new_feature_request_sensor(
                         "ingest_requirements": {
                             "config": {
                                 "feature_request": req["feature_request"],
-                                "model": req.get("model", "claude-sonnet-4-6"),
+                                "model": req.get("model", "grok-4.7"),
                                 "quality_gate_threshold": req.get(
                                     "quality_gate_threshold", 0.35
                                 ),
