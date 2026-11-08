@@ -26,6 +26,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -109,17 +110,33 @@ def _describe_model(model: ModelSelection) -> str:
 
 
 # --- the Cursor SDK call -----------------------------------------------------
-def _usage_snapshot(agent: Agent, run_id: str | None) -> dict[str, Any]:
-    try:
-        usage = agent.get_usage(run_id=run_id) if run_id else agent.get_usage()
-    except Exception as exc:  # billing snapshot is best-effort for the demo
-        return {"error": str(exc)}
+def _usage_snapshot(
+    agent: Agent, run_id: str | None, *, attempts: int = 6, delay: float = 5.0
+) -> dict[str, Any]:
+    """Billed usage for the run. Cursor's usage/cost is eventually consistent:
+    right after a run ends the backend often returns nothing, which the SDK
+    decodes as all-zero counts. Poll briefly, and report "pending" rather than
+    a misleading 0 if it still hasn't landed."""
+    usage = None
+    for attempt in range(attempts):
+        try:
+            usage = agent.get_usage(run_id=run_id) if run_id else agent.get_usage()
+        except Exception as exc:  # billing snapshot is best-effort
+            return {"error": str(exc)}
+        if usage.usage.total_tokens > 0:
+            break
+        if attempt < attempts - 1:
+            time.sleep(delay)
+    else:
+        return {"status": "pending", "note": "usage not reported yet; see the Cursor dashboard"}
 
     cost = usage.cost
     return {
         "total_tokens": usage.usage.total_tokens,
-        "input_tokens": getattr(usage.usage, "input_tokens", None),
-        "output_tokens": getattr(usage.usage, "output_tokens", None),
+        "input_tokens": usage.usage.input_tokens,
+        "output_tokens": usage.usage.output_tokens,
+        "cache_read_tokens": usage.usage.cache_read_tokens,
+        # 0 is legitimate for plan-included usage; None means cost not reported yet.
         "charged_cents": None if cost is None else cost.charged_cents,
     }
 
@@ -252,13 +269,25 @@ def _sanitize(text: Any, limit: int = 1500) -> str:
     return text[:limit]
 
 
-def render_comment(decision: dict[str, Any]) -> str:
+def render_comment(decision: dict[str, Any], approval_error: str | None = None) -> str:
     approved = decision["route"] == "auto_approve"
+    if approval_error:
+        headline = "auto-approve recommended, but the approval could not be submitted"
+    else:
+        headline = "auto-approved" if approved else "human review required"
     findings = [*decision["secrets_findings"], *decision["auth_findings"]]
     lines = [
         COMMENT_MARKER,
-        f"### PR review gate: {'auto-approved' if approved else 'human review required'}",
+        f"### PR review gate: {headline}",
         "",
+    ]
+    if approval_error:
+        lines += [
+            f"> [!WARNING]\n> GitHub rejected the approval: {_sanitize(approval_error, 300)}  ",
+            "> A human must review this PR until the gate can approve.",
+            "",
+        ]
+    lines += [
         f"**Blockers:** {', '.join(decision['blockers']) or 'none'}  ",
         f"**Complexity:** {decision['complexity']} · "
         f"**Touches auth:** {'yes' if decision['touches_auth'] else 'no'} · "
@@ -290,29 +319,47 @@ def _attempt(description: str, action: Callable[[], None]) -> None:
         print(f"::warning::{description} failed ({err.code}): {detail}", file=sys.stderr)
 
 
+class ApprovalError(Exception):
+    """GitHub refused the approval; the PR was routed to a human instead."""
+
+    def __init__(self, message: str, body: str) -> None:
+        super().__init__(message)
+        self.body = body
+
+
 def publish(gh: GitHub, pr_number: int, decision: dict[str, Any]) -> str:
+    """Comment / approve / label. Raises ApprovalError (after publishing) if approval is refused."""
+    if decision["route"] == "auto_approve":
+        # Approve *before* commenting so the comment never claims an approval
+        # that didn't happen. Needs "Allow GitHub Actions to create and approve
+        # pull requests" (Settings -> Actions -> General).
+        try:
+            gh.approve(pr_number, "Auto-approved by the PR review gate (see summary comment).")
+        except urllib.error.HTTPError as err:
+            detail = f"{err.code}: {err.read().decode(errors='replace')[:300]}"
+            body = render_comment(decision, approval_error=detail)
+            gh.upsert_comment(pr_number, body)
+            _attempt("add label", lambda: gh.add_label(pr_number, HUMAN_LABEL))
+            raise ApprovalError(f"approve failed ({detail})", body) from err
+        body = render_comment(decision)
+        gh.upsert_comment(pr_number, body)
+        _attempt("remove label", lambda: gh.remove_label(pr_number, HUMAN_LABEL))
+        return body
+
     body = render_comment(decision)
     gh.upsert_comment(pr_number, body)
-    if decision["route"] == "auto_approve":
-        _attempt("remove label", lambda: gh.remove_label(pr_number, HUMAN_LABEL))
-        # Needs "Allow GitHub Actions to create and approve pull requests".
+    _attempt(
+        "dismiss stale approval",
+        lambda: gh.dismiss_bot_approvals(
+            pr_number, "New changes no longer meet the auto-approve bar."
+        ),
+    )
+    _attempt("add label", lambda: gh.add_label(pr_number, HUMAN_LABEL))
+    if decision["assignee"]:
         _attempt(
-            "approve",
-            lambda: gh.approve(pr_number, "Auto-approved by the PR review gate (see summary comment)."),
+            "request reviewer",
+            lambda: gh.request_reviewers(pr_number, [decision["assignee"]]),
         )
-    else:
-        _attempt(
-            "dismiss stale approval",
-            lambda: gh.dismiss_bot_approvals(
-                pr_number, "New changes no longer meet the auto-approve bar."
-            ),
-        )
-        _attempt("add label", lambda: gh.add_label(pr_number, HUMAN_LABEL))
-        if decision["assignee"]:
-            _attempt(
-                "request reviewer",
-                lambda: gh.request_reviewers(pr_number, [decision["assignee"]]),
-            )
     return body
 
 
@@ -429,7 +476,12 @@ def main(argv: list[str] | None = None) -> int:
     json.dump(decision, sys.stdout, indent=2)
     sys.stdout.write("\n")
     if gh:
-        _write_step_summary(publish(gh, args.pr_number, decision))
+        try:
+            _write_step_summary(publish(gh, args.pr_number, decision))
+        except ApprovalError as err:
+            _write_step_summary(err.body)
+            print(f"::error::{err}", file=sys.stderr)
+            return 4
         return 0
     return 0 if decision["route"] == "auto_approve" else 3
 
