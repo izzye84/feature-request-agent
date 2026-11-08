@@ -136,7 +136,7 @@ def test_auto_approve_publishes_comment_and_approval():
     gh = FakeGitHub()
     body = publish(gh, 7, decision())
     names = [a[0] for a in gh.actions]
-    assert names == ["upsert_comment", "remove_label", "approve"]
+    assert names == ["approve", "upsert_comment", "remove_label"]
     assert COMMENT_MARKER in body and "auto-approved" in body
 
 
@@ -156,3 +156,45 @@ def test_comment_neutralises_links_mentions_and_html_from_agent_text():
     assert "https://evil.example" not in body
     assert "@everyone" not in body
     assert "<img" not in body
+
+
+def test_refused_approval_routes_to_human_and_never_claims_approved():
+    import io
+    import urllib.error
+
+    gh = FakeGitHub()
+
+    def refuse(*_):
+        raise urllib.error.HTTPError(
+            "u", 422, "Unprocessable", {},
+            io.BytesIO(b'{"errors":["GitHub Actions is not permitted to approve pull requests."]}'),
+        )
+
+    gh.approve = refuse
+    with pytest.raises(review_pr.ApprovalError) as exc:
+        publish(gh, 7, decision())
+    names = [a[0] for a in gh.actions]
+    assert names == ["upsert_comment", "add_label"]
+    assert "could not be submitted" in exc.value.body
+    assert "### PR review gate: auto-approved" not in exc.value.body
+
+
+# --- usage -------------------------------------------------------------------
+def _usage(total, cost=None):
+    tokens = SimpleNamespace(
+        total_tokens=total, input_tokens=total, output_tokens=0, cache_read_tokens=0
+    )
+    return SimpleNamespace(usage=tokens, cost=cost)
+
+
+def test_usage_snapshot_waits_for_billing_to_land():
+    responses = iter([_usage(0), _usage(0), _usage(1200, SimpleNamespace(charged_cents=1.5))])
+    agent = SimpleNamespace(get_usage=lambda run_id=None: next(responses))
+    snap = review_pr._usage_snapshot(agent, "run-1", delay=0)
+    assert snap["total_tokens"] == 1200 and snap["charged_cents"] == 1.5
+
+
+def test_usage_snapshot_reports_pending_instead_of_zero():
+    agent = SimpleNamespace(get_usage=lambda run_id=None: _usage(0))
+    snap = review_pr._usage_snapshot(agent, "run-1", attempts=2, delay=0)
+    assert snap["status"] == "pending" and "total_tokens" not in snap
