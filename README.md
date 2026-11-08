@@ -1,26 +1,26 @@
 # Dagster Agentic Orchestration Demo
 
-A Dagster pipeline that demonstrates agentic orchestration using Grok (xAI). A multi-step agent workflow that ingests a feature request, plans implementation tasks, generates code, runs quality gates, and produces a PR-ready artifact — all orchestrated as Dagster assets with full lineage, retries, and observability.
+A feature request goes in; a reviewed pull request comes out.
 
-It also includes a **PR review gate**: a GitHub Action that runs a Cursor SDK cloud agent on every pull request to this repo, auto-approves only simple, secret-free changes, and routes everything else to a human. See [`pr_review_gate/`](pr_review_gate/README.md).
+1. **Grok (xAI API)** turns a plain-English request into a structured spec and a task plan.
+2. **A Cursor SDK cloud agent** implements the plan in this repo and opens a real pull request.
+3. **A second Cursor SDK cloud agent**, run by a GitHub Action, reviews the PR. `review_policy.py` then auto-approves simple, secret-free changes and routes everything else to a human. See [`pr_review_gate/`](pr_review_gate/README.md).
+
+Dagster orchestrates steps 1–2 as assets.
 
 ## Pipeline overview
 
 ```
-ingest_requirements → analyze_and_plan → generate_code → run_quality_gates → publish_artifact
+ingest_requirements → analyze_and_plan → generate_code ──▶ PR ──▶ PR review gate (GitHub Action)
 ```
 
-| Asset | Agent role | Grok call |
+| Asset | Agent role | Model |
 |---|---|---|
-| `ingest_requirements` | Parses raw feature request → structured JSON spec | Yes |
-| `analyze_and_plan` | Decomposes spec → ordered task plan | Yes |
-| `generate_code` | Implements task plan → Python/SQL code | Yes |
-| `run_quality_gates` | LLM code review + threshold guardrail | Yes |
-| `publish_artifact` | Assembles PR description + lineage metadata | No |
+| `ingest_requirements` | Parses raw feature request → structured JSON spec | Grok |
+| `analyze_and_plan` | Decomposes spec → ordered task plan | Grok |
+| `generate_code` | Cursor cloud agent implements the plan and opens a real PR | Cursor |
 
-Two sensors are also included:
-- **`new_feature_request_sensor`** — polls for new requests and triggers runs automatically
-- **`quality_gate_failure_sensor`** — feedback loop: auto-retries with a relaxed threshold when quality gates fail
+A sensor, **`new_feature_request_sensor`**, polls `requests/queue.json` for new requests and triggers runs automatically.
 
 ---
 
@@ -41,7 +41,9 @@ XAI_API_KEY=xai-...
 CURSOR_API_KEY=cursor_...
 ```
 
-`CURSOR_API_KEY` is only needed to run the [PR review gate](pr_review_gate/README.md) locally (in CI it's a repository secret).
+`CURSOR_API_KEY` is used by `generate_code` (and to run the [PR review gate](pr_review_gate/README.md) locally; in CI it's a repository secret). Cursor's GitHub App must have access to the repo: https://cursor.com/dashboard/integrations. The repo is set by `REPO` in `definitions.py`.
+
+Every run opens a real pull request, which then goes through the PR review gate.
 
 To get an API key: go to **console.x.ai** → API Keys → Create Key.
 
@@ -69,7 +71,7 @@ Open http://localhost:3000 in your browser.
 ### Option 2: CLI launch
 
 ```bash
-uv run dg launch --assets "ingest_requirements,analyze_and_plan,generate_code,run_quality_gates,publish_artifact"
+uv run dg launch --assets "ingest_requirements,analyze_and_plan,generate_code"
 ```
 
 ---
@@ -87,8 +89,6 @@ ops:
         to the curated layer."
       model: "grok-4.7"
       max_tokens: 4096
-      quality_gate_threshold: 0.35
-      reviewer: "data-eng-team"
 ```
 
 ### Config fields
@@ -98,8 +98,6 @@ ops:
 | `feature_request` | *(data quality check example)* | The feature request text. Paste any plain-English request here. |
 | `model` | `grok-4.7` | Any xAI model string. See model options below. |
 | `max_tokens` | `4096` | Max tokens per Grok response. Increase for complex codegen. |
-| `quality_gate_threshold` | `0.35` | Float 0.0–1.0. LLM review score must meet or exceed this to pass. Raise it (e.g. `0.99`) to deliberately trigger a gate failure for demo purposes. |
-| `reviewer` | `data-eng-team` | Label shown in the PR artifact. No functional effect. |
 
 ### Available Grok models
 
@@ -111,34 +109,19 @@ The default is `grok-4.7`. See the [xAI models page](https://docs.x.ai/developer
 
 After a successful run:
 
-- **Asset graph** — five nodes with Grok badges showing the dependency chain
+- **Asset graph** — three nodes (Grok, Grok, Cursor) showing the dependency chain
 - **`ingest_requirements` metadata** — structured JSON spec, complexity, estimated hours, tokens used
 - **`analyze_and_plan` metadata** — full task plan JSON, task count, risk list, reviewer notes
-- **`generate_code` metadata** — generated Python source code, line count, artifact URL
-- **`run_quality_gates` metadata** — review JSON, overall score (0.0–1.0), security concerns, suggestions
-- **`publish_artifact` metadata** — rendered markdown PR description ready to copy into GitHub
-
-### Triggering the quality gate failure / feedback loop
-
-Set `quality_gate_threshold` to `0.99` in the Launchpad config to force a gate failure. The `quality_gate_failure_sensor` (when enabled) will automatically re-submit the run with a lower threshold, demonstrating the feedback loop.
+- **`generate_code` metadata** — PR link, branch, the Cursor agent's summary, and run duration
+- **The PR on GitHub** — the review gate's comment, plus an approval or the `needs-human-review` label
 
 ---
 
-## Demoing the sensors
+## Demoing the sensor
 
-Both sensors are **STOPPED by default**. Enable them in the Dagster UI under **Automation → Sensors** before running these demos.
+The sensor is **STOPPED by default**. Enable it in the Dagster UI under **Automation → Sensors** before running this demo.
 
-### Demo 1: `quality_gate_failure_sensor` (feedback loop)
-
-1. Enable `quality_gate_failure_sensor` in the Automation tab
-2. Launch a run with `quality_gate_threshold: 0.99` (forces a gate failure)
-3. Watch the run fail at `run_quality_gates`
-4. The sensor fires on the next tick and automatically re-submits the run with `quality_gate_threshold: 0.89`
-5. Keep watching — it will keep lowering the threshold until the gate passes
-
-This demonstrates the **agent reflects and retries** pattern: the pipeline self-corrects without human intervention.
-
-### Demo 2: `new_feature_request_sensor` (event-driven trigger)
+### `new_feature_request_sensor` (event-driven trigger)
 
 The sensor polls `requests/queue.json` every 30 seconds for new entries. An example entry is already in the file — here's how to demo it:
 
@@ -150,16 +133,12 @@ The sensor polls `requests/queue.json` every 30 seconds for new entries. An exam
   {
     "id": "FR-001",
     "feature_request": "...",
-    "model": "grok-4.7",
-    "quality_gate_threshold": 0.35,
-    "reviewer": "data-eng-team"
+    "model": "grok-4.7"
   },
   {
     "id": "FR-002",
     "feature_request": "Write a Dagster asset that reads a list of stock tickers and returns the top 5 by 30-day price volatility.",
-    "model": "grok-4.7",
-    "quality_gate_threshold": 0.35,
-    "reviewer": "quant-team"
+    "model": "grok-4.7"
   }
 ]
 ```
@@ -183,13 +162,14 @@ A separate prototype in [`pr_review_gate/`](pr_review_gate/README.md): a GitHub 
 
 ```
 src/dagster_agent_demo/
-├── definitions.py          # Dagster entry point — binds GrokResource, loads defs
+├── definitions.py          # Dagster entry point — binds resources, loads defs
 ├── resources/
+│   ├── cursor.py           # CursorResource: runs a Cursor cloud agent that opens a PR
 │   └── grok.py             # Custom GrokResource (modelled on dagster-anthropic)
 └── defs/
     ├── __init__.py         # Empty — load_from_defs_folder handles discovery
-    ├── assets.py           # Grok feature-request pipeline
-    └── sensors.py          # Feedback-loop sensor + new-request sensor
+    ├── assets.py           # Feature-request pipeline (Grok → Grok → Cursor)
+    └── sensors.py          # New-request sensor
 ```
 
 ---
