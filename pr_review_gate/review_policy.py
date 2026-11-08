@@ -33,6 +33,10 @@ The team only auto-approves PRs that meet ALL of these bars:
    typo fixes, config comments, dependency pins with no behavior change,
    or a small isolated bugfix. Anything that rewires services, data
    models, public APIs, infra, or auth must go to a human.
+4. Correctness: the code is complete (no truncated or placeholder logic),
+   would run as written, and does what the PR title and description say.
+   No obvious bugs. If the PR adds tests, they actually exercise the new
+   code. If you can't tell whether it works, return "human_review".
 
 Return ONLY valid JSON (no markdown fences) with this shape:
 {
