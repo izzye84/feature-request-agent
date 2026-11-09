@@ -312,6 +312,12 @@ def generate_code(
         Acceptance criteria:
         {criteria}
 
+        Follow the dagster-expert skill (.cursor/skills/dagster-expert) before
+        writing any Dagster code: read its SKILL.md and the asset references
+        it points to, and follow its conventions. Where the skill conflicts
+        with the rules below (e.g. it suggests `dg scaffold` or a Component),
+        the rules win.
+
         Rules:
         - Put the asset in ONE new file under generated/ (create the folder
           if needed). Do not modify any existing files.

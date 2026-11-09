@@ -45,6 +45,8 @@ CURSOR_API_KEY=cursor_...
 
 Every run opens a real pull request, which then goes through the PR review gate.
 
+The Cursor agent follows Dagster's `dagster-expert` skill, committed at `.cursor/skills/dagster-expert/`. Cursor cloud agents load project skills from the repo they clone, and the `generate_code` prompt tells the agent to use it. It's copied from [dagster-io/skills](https://github.com/dagster-io/skills) (`release-stable`, 1.13.29; Apache-2.0). To update it, copy `plugins/dagster/skills/dagster-expert/` from that repo again.
+
 To get an API key: go to **console.x.ai** → API Keys → Create Key.
 
 > **Note:** The xAI API is billed per token, separately from any Grok / X Premium subscription.
@@ -161,6 +163,8 @@ A separate prototype in [`pr_review_gate/`](pr_review_gate/README.md): a GitHub 
 ## Project structure
 
 ```
+.cursor/skills/
+└── dagster-expert/         # Dagster's agent skill, loaded by the Cursor cloud agent
 src/dagster_agent_demo/
 ├── definitions.py          # Dagster entry point — binds resources, loads defs
 ├── resources/
