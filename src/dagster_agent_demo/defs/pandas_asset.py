@@ -1,6 +1,6 @@
 import dagster as dg
+import pandas as pd
 
-#intentionally not importing pandas to demonstrate auto CI fixes
 
 @dg.asset
 def my_dataframe() -> pd.DataFrame:
