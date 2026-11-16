@@ -1,0 +1,10 @@
+{
+  "plugins": {
+    "dagster/dagster-expert": {
+      "enabled": true
+    },
+    "dagster/dignified-python": {
+      "enabled": true
+    }
+  }
+}
