@@ -69,7 +69,7 @@ def daily_interest_accrual(
 
     for row in LEDGER_BALANCES:
         posting_date = date.fromisoformat(row["posting_date"])
-        if start <= posting_date < end:
+        if start <= posting_date <= end:
             interest = daily_accrual(
                 Decimal(row["ledger_balance_usd"]),
                 Decimal(row["annual_rate"]),
