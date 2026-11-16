@@ -1,0 +1,28 @@
+# Runs from the pull request branch. The workflow does not need to exist on
+# the default branch: opening the PR is enough. A missing import (pandas in
+# defs/pandas_asset.py) fails this check with the NameError in the job log,
+# which is what CI autofix reads.
+
+name: Check defs
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check-defs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - run: uv sync --frozen
+
+      - name: Validate definitions
+        run: uv run dg check defs
